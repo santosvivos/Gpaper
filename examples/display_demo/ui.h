@@ -19,6 +19,19 @@
 #define EPD_COLOR_BORDER      0xBBBBBB
 #define EPD_COLOR_PROMPT_BG   0x1e1e00
 #define EPD_COLOR_PROMPT_TXT  0xfffee6
+#define EPD_REFRESH_TIME 150
+
+/*********************************************************************************
+ *                                   MACROS
+ * *******************************************************************************/
+
+/*********************************************************************************
+ *                                  TYPEDEFS
+ * *******************************************************************************/
+// ... 
+
+// At the end or in Global Prototypes:
+// void scr_back_btn_create(lv_obj_t *parent, const char *text, lv_event_cb_t cb);
 
 /*********************************************************************************
  *                                   MACROS
@@ -38,14 +51,17 @@ enum {
     SCREEN7_ID,
     SCREEN8_ID,
     SCREEN9_ID,
+    SCREEN10_ID,
+    SCREEN11_ID,
 };
 
 /*********************************************************************************
  *                              GLOBAL PROTOTYPES
  * *******************************************************************************/
 void ui_epd47_entry(void);
+void scr_back_btn_create(lv_obj_t *parent, const char *text, lv_event_cb_t cb);
 // week fun (ui interface)
-void ui_if_epd_refr(void);
+void ui_if_epd_refr(uint16_t time);
 void ui_epd_refr(uint16_t time, uint16_t cycle, uint16_t times);
 
 void ui_if_epd_get_time(uint8_t *h, uint8_t *m, uint8_t *s);

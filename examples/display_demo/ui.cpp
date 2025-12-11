@@ -1,9 +1,11 @@
 #include "ui.h"
+#include "src/ui_carousel.h"
+#include "src/ui_wifi_custom.h"
 #include "src/assets.h"
 #include "scr_mrg.h"
 #include "Arduino.h"
 
-#define EPD_REFRESH_TIME 150
+
 
 #define UI_PORTRAIT_SCR_MODE    1
 #define UI_LORA_AUTO_SEND       0
@@ -53,7 +55,7 @@ void scr_middle_line(lv_obj_t *parent)
 }
 //************************************[ screen 0 ]****************************************** menu
 #if 1
-#define MENU_ICON_NUM  (9)
+#define MENU_ICON_NUM  (11)
 #define MENU_CONT_HIGH (LCD_VER_SIZE * 0.84)
 
 /*** UI interfavce ***/
@@ -78,7 +80,9 @@ const struct menu_icon icon_buf[MENU_ICON_NUM] = {
     {&ver_wifi,     "wifi",      270, 45},
     {&ver_battery,  "battery",   475, 375},
     {&ver_shutdown, "shutdown",  475, 210},
-    {&ver_refresh,  "refresh",   475, 45}
+    {&ver_refresh,  "refresh",   475, 45},
+    {&ver_wifi,     "wifi mgr",  680, 210},
+    {&ver_lightning,  "api",      680, 375}
 };
 #else
 const struct menu_icon icon_buf[MENU_ICON_NUM] = {
@@ -91,6 +95,7 @@ const struct menu_icon icon_buf[MENU_ICON_NUM] = {
     {&img_battery,  "battery"},
     {&img_shutdown, "shutdown"},
     {&img_refresh, "refresh"},
+    {&img_lightning, "api"},
 };
 #endif
 
@@ -110,19 +115,99 @@ static void menu_btn_event(lv_event_t *e)
             case 6: scr_mgr_push(SCREEN7_ID, false); ui_if_epd_refr(EPD_REFRESH_TIME); break;
             case 7: scr_mgr_push(SCREEN8_ID, false); ui_if_epd_refr(EPD_REFRESH_TIME); break;
             case 8: scr_mgr_push(SCREEN9_ID, false); ui_if_epd_refr(EPD_REFRESH_TIME); break;
+            case 9: scr_mgr_push(SCREEN11_ID, false); ui_if_epd_refr(EPD_REFRESH_TIME); break;
+            case 10: scr_mgr_push(SCREEN10_ID, false); ui_if_epd_refr(EPD_REFRESH_TIME); break;
             default: break;
         }
     }
 }
 
+static lv_timer_t * wifi_status_timer = NULL;
+static lv_obj_t * wifi_stat_obj = NULL;
+
+static void wifi_icon_draw_event_cb(lv_event_t * e) {
+    lv_obj_t * obj = lv_event_get_target(e);
+    lv_draw_ctx_t * draw_ctx = lv_event_get_draw_ctx(e);
+    
+    // Coordinates
+    lv_coord_t w = lv_obj_get_width(obj);
+    lv_coord_t h = lv_obj_get_height(obj);
+    lv_point_t center = { (lv_coord_t)(obj->coords.x1 + w/2), (lv_coord_t)(obj->coords.y1 + h - 4) }; // Bottom center
+    
+    // Check connection
+    bool connected = WiFi.isConnected();
+    
+    // Draw Arcs
+    lv_draw_arc_dsc_t arc_dsc;
+    lv_draw_arc_dsc_init(&arc_dsc);
+    arc_dsc.color = lv_color_black();
+    arc_dsc.width = 3;
+    arc_dsc.rounded = 1;
+    
+    // 3 Arcs
+    // Outer
+    lv_draw_arc(draw_ctx, &arc_dsc, &center, 24, 225, 315);
+    // Middle
+    lv_draw_arc(draw_ctx, &arc_dsc, &center, 16, 225, 315);
+    // Inner
+    lv_draw_arc(draw_ctx, &arc_dsc, &center, 8, 225, 315);
+    
+    // Dot (Smallest)
+    lv_draw_arc_dsc_t dot_dsc;
+    lv_draw_arc_dsc_init(&dot_dsc);
+    dot_dsc.color = lv_color_black();
+    dot_dsc.width = 6; // solid dot
+    lv_draw_arc(draw_ctx, &dot_dsc, &center, 2, 0, 360);
+    
+    // Cross line if disconnected
+    if (!connected) {
+        lv_draw_line_dsc_t line_dsc;
+        lv_draw_line_dsc_init(&line_dsc);
+        line_dsc.color = lv_color_black();
+        line_dsc.width = 3;
+        
+        lv_point_t p1 = { obj->coords.x1, (lv_coord_t)(obj->coords.y1 + h) };
+        lv_point_t p2 = { (lv_coord_t)(obj->coords.x1 + w), obj->coords.y1 };
+        lv_draw_line(draw_ctx, &line_dsc, &p1, &p2);
+    }
+}
+
+static void wifi_status_timer_cb(lv_timer_t * timer) {
+    if (!wifi_stat_obj) return;
+    static bool prev_connected = false;
+    bool connected = WiFi.isConnected();
+    
+    if (connected != prev_connected) {
+        prev_connected = connected;
+        lv_obj_invalidate(wifi_stat_obj); // Trigger redraw
+        ui_if_epd_refr(EPD_REFRESH_TIME);
+    }
+}
+
 static void create0(lv_obj_t *parent) 
 {
+    // WiFi Status Icon (Persistent) - Procedurally Drawn
+    wifi_stat_obj = lv_obj_create(parent);
+    lv_obj_set_size(wifi_stat_obj, 36, 36); 
+    lv_obj_align(wifi_stat_obj, LV_ALIGN_TOP_LEFT, 15, 15);
+    // Transparent background
+    lv_obj_set_style_bg_opa(wifi_stat_obj, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(wifi_stat_obj, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(wifi_stat_obj, LV_OBJ_FLAG_SCROLLABLE);
+    
+    // Add Draw Callback
+    lv_obj_add_event_cb(wifi_stat_obj, wifi_icon_draw_event_cb, LV_EVENT_DRAW_MAIN, NULL);
+    
+    // Create timer
+    if (wifi_status_timer) lv_timer_del(wifi_status_timer);
+    wifi_status_timer = lv_timer_create(wifi_status_timer_cb, 5000, NULL);
+
 #if UI_PORTRAIT_SCR_MODE 
     for(int i = 0; i < sizeof(icon_buf)/sizeof(icon_buf[0]); i++) {
         lv_obj_t * btn = lv_btn_create(parent);
         lv_obj_remove_style_all(btn);
         lv_obj_set_width(btn, 160);
-        lv_obj_set_height(btn, 120);
+        lv_obj_set_height(btn, 140);
         lv_obj_set_x(btn, icon_buf[i].offs_x);
         lv_obj_set_y(btn, icon_buf[i].offs_y);
         lv_obj_add_flag(btn, LV_OBJ_FLAG_OVERFLOW_VISIBLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
@@ -139,7 +224,7 @@ static void create0(lv_obj_t *parent)
     }
 #else
     lv_obj_t *scr0_cont = lv_obj_create(parent);
-    lv_obj_set_size(scr0_cont, lv_pct(100), MENU_CONT_HIGH);
+    lv_obj_set_size(scr0_cont, LCD_HOR_SIZE, MENU_CONT_HIGH);
     lv_obj_set_style_bg_color(scr0_cont, lv_color_hex(0xffffff), LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(scr0_cont, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_border_width(scr0_cont, 0, LV_PART_MAIN);
@@ -188,7 +273,12 @@ static void create0(lv_obj_t *parent)
 #endif
 }
 static void entry0(void) { }
-static void exit0(void) { }
+static void exit0(void) { 
+    if(wifi_status_timer) {
+        lv_timer_del(wifi_status_timer);
+        wifi_status_timer = NULL;
+    }
+}
 static void destroy0(void) { }
 
 static scr_lifecycle_t screen0 = {
@@ -1862,6 +1952,40 @@ static scr_lifecycle_t screen9 = {
     .destroy = destroy9,
 };
 #endif
+//************************************[ screen 10 ]****************************************** carousel
+#if 1
+
+static void create10(lv_obj_t *parent) {
+    create_carousel_app(parent);
+}
+static void entry10(void) { }
+static void exit10(void) { }
+static void destroy10(void) { }
+
+static scr_lifecycle_t screen10 = {
+    .create = create10,
+    .entry = entry10,
+    .exit  = exit10,
+    .destroy = destroy10,
+};
+#endif
+//************************************[ screen 11 ]****************************************** wifi mgr
+#if 1
+
+static void create11(lv_obj_t *parent) {
+    create_wifi_custom_app(parent);
+}
+static void entry11(void) { }
+static void exit11(void) { }
+static void destroy11(void) { }
+
+static scr_lifecycle_t screen11 = {
+    .create = create11,
+    .entry = entry11,
+    .exit  = exit11,
+    .destroy = destroy11,
+};
+#endif
 //************************************[ UI ENTRY ]******************************************
 
 void home_back_timer_event(lv_timer_t *t)
@@ -1900,8 +2024,10 @@ void ui_epd47_entry(void)
     scr_mgr_register(SCREEN5_ID, &screen5); // test
     scr_mgr_register(SCREEN6_ID, &screen6); // wifi
     scr_mgr_register(SCREEN7_ID, &screen7); // battery
-    scr_mgr_register(SCREEN8_ID, &screen8); // battery
-    scr_mgr_register(SCREEN9_ID, &screen9); // battery
+    scr_mgr_register(SCREEN8_ID, &screen8); // shutdown
+    scr_mgr_register(SCREEN9_ID, &screen9); // refresh
+    scr_mgr_register(SCREEN10_ID, &screen10); // carousel app
+    scr_mgr_register(SCREEN11_ID, &screen11); // wifi mgr
 
     scr_mgr_switch(SCREEN0_ID, false); // set root screen
     scr_mgr_set_anim(LV_SCR_LOAD_ANIM_NONE, LV_SCR_LOAD_ANIM_NONE, LV_SCR_LOAD_ANIM_NONE);
