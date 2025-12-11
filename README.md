@@ -5,6 +5,11 @@
   <b>Note:</b> This is the OG H752 fork (non-GPS version).
 </p>
 
+<br><br><br><br><br>
+<hr>
+<p align="center"><i><b>original .readme content</b></i></p>
+<br>
+
 <h1 align = "center">🏆T5_E_Paper_S3_Pro🏆</h1>
 
 
