@@ -1,4 +1,10 @@
 
+<h1 align="center"><u><b>Gpaper</b></u></h1>
+<p align="center">
+  T5 E Paper S3 Pro firmware fork designed to bring additional features to the device.<br>
+  <b>Note:</b> This is the OG H752 fork (non-GPS version).
+</p>
+
 <h1 align = "center">🏆T5_E_Paper_S3_Pro🏆</h1>
 
 
