@@ -2,6 +2,7 @@
 #include "display_demo.h"
 #include "esp_sleep.h"
 #include "ui.h"
+#include <ArduinoJson.h>
 #include <LittleFS.h>
 
 //
@@ -138,7 +139,8 @@ void eeprom_init() {
     delay(1000000);
   }
   uint8_t frist_flag = EEPROM.read(0);
-  Serial.printf("eeprom flag: %d\n", frist_flag);
+  Serial.printf("[EEPROM] Flag: %d (Expected: %d)\n", frist_flag,
+                EEPROM_UPDATA_FLAG_NUM);
   if (frist_flag == EEPROM_UPDATA_FLAG_NUM) {
     for (int i = WIFI_SSID_EEPROM_ADDR;
          i < WIFI_SSID_EEPROM_ADDR + WIFI_SSID_MAX_LEN; i++) {
@@ -277,8 +279,19 @@ void lv_port_disp_init(void) {
   lv_indev_drv_register(&indev_drv);
 }
 
+// Check for background connection if not yet connected
 static void get_curr_time(lv_timer_t *t) {
-  static int cnt = 0;
+  if (wifi_is_connect == false) {
+    wl_status_t s = WiFi.status();
+    Serial.printf("[WiFi] Status check: %d\n", s);
+
+    if (s == WL_CONNECTED) {
+      wifi_is_connect = true;
+      Serial.println("[Background] WiFi connected! Updating time...");
+      configTime(8 * 3600, 0, ntpServer1, ntpServer2);
+    }
+  }
+
   if (wifi_is_connect == true) {
     if (!getLocalTime(&timeinfo)) {
       Serial.println("Failed to obtain time");
@@ -314,6 +327,79 @@ void wifi_init(void) {
       break;
     }
   }
+}
+
+void load_wifi_creds_from_fs() {
+  if (!LittleFS.exists("/wifi_creds.json")) {
+    Serial.println("[AutoConnect] /wifi_creds.json not found.");
+    return;
+  }
+
+  File file = LittleFS.open("/wifi_creds.json", "r");
+  if (!file) {
+    Serial.println("[AutoConnect] Failed to open /wifi_creds.json");
+    return;
+  }
+
+  DynamicJsonDocument doc(4096);
+  DeserializationError error = deserializeJson(doc, file);
+  file.close();
+
+  if (error) {
+    Serial.print("[AutoConnect] JSON parsing failed: ");
+    Serial.println(error.c_str());
+    return;
+  }
+
+  JsonArray networks = doc["networks"];
+  if (networks.isNull() || networks.size() == 0) {
+    Serial.println("[AutoConnect] No networks in JSON.");
+    return;
+  }
+
+  // Iterate to find the first valid network (simplified: just take the last one
+  // or first one) Logic: The WiFi Manager app allows multiple, but for
+  // auto-connect we'll just pick the last added one (which is usually the most
+  // recent). Or the first. Let's pick the last one to match typical usage, or
+  // iterate them. For now, let's just pick the last one in the array as
+  // 'current'.
+
+  // Actually, let's just grab the last one in the list, assuming it's the most
+  // relevant? Or better, check if we can verify which one was 'selected'. The
+  // WiFi Manager saves all valid ones. Let's try to connect to the LAST one in
+  // the list.
+
+  JsonObject net = networks[networks.size() - 1];
+  const char *s = net["ssid"];
+  const char *p = net["pass"];
+
+  if (s && strlen(s) > 0) {
+    strncpy(wifi_ssid, s, WIFI_SSID_MAX_LEN);
+    if (p)
+      strncpy(wifi_password, p, WIFI_PSWD_MAX_LEN);
+    else
+      memset(wifi_password, 0, WIFI_PSWD_MAX_LEN);
+
+    Serial.printf("[AutoConnect] Loaded from FS: %s\n", wifi_ssid);
+  }
+}
+
+void wifi_auto_connect_start(void) {
+  load_wifi_creds_from_fs(); // Try loading from FS first
+
+  Serial.printf("[AutoConnect] stored SSID len: %d\n", strlen(wifi_ssid));
+  if (strlen(wifi_ssid) ==
+      0) { // Check SSID only, password might be empty for open networks
+    Serial.println("[AutoConnect] No saved credentials (length 0).");
+    return;
+  }
+  Serial.printf("[AutoConnect] Starting background connection to: '%s'\n",
+                wifi_ssid);
+  WiFi.mode(WIFI_STA); // Force Station Mode
+  WiFi.disconnect();   // Clear previous state
+  delay(500);          // Increased delay for radio stabilization
+  WiFi.begin(wifi_ssid, wifi_password);
+  Serial.println("[AutoConnect] WiFi.begin() called.");
 }
 
 // lora
@@ -506,7 +592,17 @@ void setup() {
 
   eeprom_init();
 
-  // wifi_init();
+  // Initialize LittleFS BEFORE trying to read WiFi credentials
+  if (!LittleFS.begin(true)) {
+    Serial.println("LittleFS Mount Failed");
+  } else {
+    Serial.println("LittleFS Mount Success");
+  }
+
+  // Trigger background auto-connect using saved credentials
+  wifi_auto_connect_start();
+
+  // wifi_init(); // Blocking init removed in favor of auto-connect
   configTime(8 * 3600, 0, ntpServer1, ntpServer2);
 
   epd_init();
@@ -631,13 +727,6 @@ void setup() {
   pinMode(LORA_RST, OUTPUT);
 
   get_curr_data_timer = lv_timer_create(get_curr_time, 5000, NULL);
-
-  // Initialize LittleFS for Saved WiFi Credentials
-  if (!LittleFS.begin(true)) {
-    Serial.println("LittleFS Mount Failed");
-  } else {
-    Serial.println("LittleFS Mount Success");
-  }
 }
 
 int count = 0;
